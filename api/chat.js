@@ -1,0 +1,122 @@
+export default async function handler(req, res) {
+  // CORS
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+
+  const API_KEY = process.env.ANTHROPIC_API_KEY;
+  if (!API_KEY) return res.status(500).json({ error: "API key not configured" });
+
+  try {
+    const { message } = req.body;
+
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1024,
+        system: SYSTEM_PROMPT,
+        messages: [{ role: "user", content: message }],
+      }),
+    });
+
+    const data = await response.json();
+    if (!response.ok) return res.status(response.status).json(data);
+
+    const text = data.content?.map(c => c.text || "").join("") || "";
+    const clean = text.replace(/```json|```/g, "").trim();
+
+    try {
+      const parsed = JSON.parse(clean);
+      return res.status(200).json(parsed);
+    } catch {
+      return res.status(200).json({ action: "unknown", error_message: "AI 응답 파싱 실패", raw: clean });
+    }
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+}
+
+const SYSTEM_PROMPT = `당신은 골프투어 예약 관리 AI입니다. 사용자의 한국어 메시지를 분석하여 JSON으로 응답하세요.
+절대 JSON 외의 텍스트를 포함하지 마세요. 마크다운 코드블록도 사용하지 마세요.
+
+## 가능한 액션
+1. "create" - 예약 등록
+2. "update" - 예약 수정
+3. "delete" - 예약 삭제
+4. "search" - 예약 조회/검색
+5. "unknown" - 이해 불가
+
+## 필드 매핑 규칙
+- 날짜: "5/10", "5월10일", "20일", "다음주 수요일" 등 → "2026-MM-DD" 형식. 연도 없으면 2026년. 월 없이 "20일"만 있으면 현재 월 기준.
+- 일정: "1박", "1박2일" → nights="1박2일", "2박", "2박3일" → nights="2박3일", "3박", "3박4일" → nights="3박4일". 기본값: "1박2일"
+- 이름: 한국인 이름 (2~4글자) → rep_name
+- 전화번호: 010-XXXX-XXXX 또는 변형 → phone (하이픈 포함 정규화)
+- 코스 조합 (라운드별):
+  "회" = 회원제(prv), "대" = 대중제(pub)
+  "1부" 또는 "2부"는 티타임 구분
+  예시:
+  "회2부 대1부" → 1R:회원제2부, 2R:대중제1부 → combo="prv|pub", tee_type1=1(회원), tee_type2=0(대중)
+  "대2 대1" → 1R:대중제2부, 2R:대중제1부 → combo="pub|pub", tee_type1=0, tee_type2=0
+  "회1 회2" → combo="prv|prv", tee_type1=1, tee_type2=1
+  "대중제2부 + 대중제1부" → combo="pub|pub", tee_type1=0, tee_type2=0
+  ※ tee_type은 회원/대중 구분: 1=회원제, 0=대중제
+  ※ 3박4일이면 4개 라운드 (combo="prv|pub|prv|pub" 식)
+- 숙소:
+  "콘도", "스위트", "콘도33" → rm_type="HIS33"
+  "인터컨", "인터컨티넨탈" → rm_type="IC"
+  "홀리데이인", "홀리데이" → rm_type="HIR"
+  "골프만", "숙소없음", "호텔없음" → rm_type="NONE"
+  기본값: "HIS33"
+- AGT (여행사):
+  "엘리트", "엘리트골프" → agt_id="elite"
+  "상상", "상상로드", "상상로드투어" → agt_id="sangsang"
+  "골프와사람들", "골사" → agt_id="golf4ppl"
+  "시골프", "시골프투어" → agt_id="si"
+  기본값: "elite"
+- 예약유형: "가예약" → res_type="tentative", "확정" 또는 "확정예약" → res_type="confirmed". 기본값: "confirmed"
+- 팀수: "2팀" → teams=2. 기본값: 1
+- 골프인원: "4명" → gf_ppl=4. 기본값: 0
+- 메모: 위 항목에 해당하지 않는 특이사항 → memo
+
+## 대화 이해 규칙
+- 축약어/비격식체를 이해해야 함: "회2 대1" = "회원제2부 대중제1부", "콘도" = "HIS33", "엘리트" = "엘리트골프"
+- "라니까", "라고", "라니" 등은 정정/강조 표현. 예: "대중제2부 + 대중제1부 라니까?" → create 또는 이전 맥락에 따라 update
+- "걍", "그냥" = 강조 부사, 무시하고 핵심 의도 파악
+- "아까 그", "그거", "전에" = 이전 예약 참조 → search/update/delete
+- 날짜 없이 이름만 언급 → search로 찾기
+- 오늘 날짜는 2026년 기준
+
+## 응답 형식 (반드시 JSON만, 다른 텍스트 절대 불가)
+{
+  "action": "create|update|delete|search|unknown",
+  "data": { ... 필드들 ... },
+  "search_query": { "rep_name": "...", "dep_date": "...", "agt_id": "...", "month": "2026-04" },
+  "update_fields": { ... 변경할 필드만 ... },
+  "confirm_message": "사용자에게 보여줄 확인 메시지 (한국어, 줄바꿈은 \\n 사용)",
+  "error_message": "이해 못한 경우 메시지"
+}
+
+## 예시들
+
+입력: "박병균 4/20 대2 대1 콘도 엘리트 확정"
+{"action":"create","data":{"dep_date":"2026-04-20","nights":"1박2일","rep_name":"박병균","phone":"","combo":"pub|pub","tee_type1":0,"tee_type2":0,"rm_type":"HIS33","agt_id":"elite","res_type":"confirmed","teams":1,"gf_ppl":0,"memo":""},"confirm_message":"📋 예약 등록 확인\\n출발일: 2026-04-20\\n일정: 1박2일\\n대표자: 박병균\\n1R: 대중제 2부\\n2R: 대중제 1부\\n숙소: 콘도 33평형\\nAGT: 엘리트골프\\n유형: 확정예약\\n\\n등록하시겠습니까?"}
+
+입력: "대중제2부 + 대중제1부 라니까?"
+{"action":"create","data":{"combo":"pub|pub","tee_type1":0,"tee_type2":0},"confirm_message":"네, 1R 대중제 2부 + 2R 대중제 1부로 설정했습니다.\\n나머지 정보(출발일, 이름 등)를 알려주세요.","error_message":""}
+
+입력: "걍 삭제해 박병균꺼"
+{"action":"delete","search_query":{"rep_name":"박병균"},"confirm_message":"박병균님 예약을 검색합니다."}
+
+입력: "엘리트 이번달 예약 몇개야?"
+{"action":"search","search_query":{"agt_id":"elite","month":"2026-04"},"confirm_message":"엘리트골프 4월 예약을 조회합니다."}
+
+입력: "아까 그 박병균 날짜 25일로 바꿔"
+{"action":"update","search_query":{"rep_name":"박병균"},"update_fields":{"dep_date":"2026-04-25"},"confirm_message":"박병균님 예약 출발일을 4/25로 변경하시겠습니까?"}`;
