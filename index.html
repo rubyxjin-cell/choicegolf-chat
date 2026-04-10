@@ -1,568 +1,122 @@
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>초이스골프 AI 예약</title>
-<style>
-  @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif; background: #0a0f0d; color: #e8f0ec; height: 100dvh; overflow: hidden; }
-  
-  /* Login */
-  #loginWrap { display: flex; align-items: center; justify-content: center; height: 100dvh; }
-  #loginBox { text-align: center; padding: 40px; }
-  #loginBox .icon { font-size: 52px; margin-bottom: 12px; }
-  #loginBox h1 { font-size: 24px; font-weight: 800; color: #34d399; margin-bottom: 4px; letter-spacing: -0.5px; }
-  #loginBox p { font-size: 13px; color: #7a9a8a; margin-bottom: 32px; }
-  #loginBox input { width: 220px; padding: 14px 16px; border-radius: 12px; border: 1px solid #2a3a32; background: #131a16; color: #e8f0ec; font-size: 16px; text-align: center; outline: none; display: block; margin: 0 auto; }
-  #loginBox input::placeholder { color: #7a9a8a; }
-  #loginBox button { display: block; width: 220px; margin: 12px auto 0; padding: 14px; border-radius: 12px; border: none; background: #34d399; color: #0a0f0d; font-size: 15px; font-weight: 700; cursor: pointer; }
-
-  /* Chat layout */
-  #chatWrap { display: none; flex-direction: column; height: 100dvh; }
-  #chatHeader { padding: 16px 20px; background: #131a16; border-bottom: 1px solid #2a3a32; flex-shrink: 0; display: flex; align-items: center; gap: 12px; }
-  #chatHeader .icon { font-size: 26px; }
-  #chatHeader .title { font-size: 16px; font-weight: 800; }
-  #chatHeader .status { font-size: 11px; color: #34d399; }
-  
-  #messages { flex: 1; overflow-y: auto; padding: 16px 12px; -webkit-overflow-scrolling: touch; }
-  .msg { display: flex; margin-bottom: 10px; }
-  .msg.user { justify-content: flex-end; }
-  .msg.ai { justify-content: flex-start; }
-  .bubble { max-width: 85%; padding: 12px 16px; border-radius: 16px; font-size: 14px; line-height: 1.65; white-space: pre-wrap; word-break: break-word; }
-  .msg.user .bubble { background: #1a6b4d; color: #e8f0ec; border-bottom-right-radius: 4px; }
-  .msg.ai .bubble { background: #1a2420; color: #e8f0ec; border-bottom-left-radius: 4px; border: 1px solid #2a3a32; }
-  
-  .loading-dot { display: inline-block; animation: pulse 1.4s infinite; }
-  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
-
-  /* Quick buttons */
-  .quick-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-  .quick-btn { padding: 8px 14px; border-radius: 20px; border: 1px solid #2a3a32; background: #131a16; color: #34d399; font-size: 12px; font-weight: 600; cursor: pointer; }
-  .quick-btn:active { background: #1a6b4d; }
-
-  /* Input area */
-  #inputArea { padding: 12px; background: #131a16; border-top: 1px solid #2a3a32; flex-shrink: 0; }
-  #inputRow { display: flex; gap: 8px; max-width: 600px; margin: 0 auto; }
-  #chatInput { flex: 1; padding: 14px 16px; border-radius: 12px; border: 1px solid #2a3a32; background: #1a2420; color: #e8f0ec; font-size: 15px; outline: none; font-family: inherit; }
-  #chatInput::placeholder { color: #7a9a8a; }
-  #sendBtn { padding: 14px 20px; border-radius: 12px; border: none; background: #34d399; color: #0a0f0d; font-size: 15px; font-weight: 700; cursor: pointer; flex-shrink: 0; }
-  #sendBtn:disabled { background: #2a3a32; cursor: default; }
-  #footer { text-align: center; font-size: 11px; color: #7a9a8a; margin-top: 8px; padding-bottom: env(safe-area-inset-bottom, 0); }
-</style>
-</head>
-<body>
-
-<!-- Login -->
-<div id="loginWrap">
-  <div id="loginBox">
-    <div class="icon">🏌️</div>
-    <h1>초이스골프</h1>
-    <p>AI 예약 관리 시스템</p>
-    <input type="password" id="pwInput" placeholder="비밀번호 입력">
-    <button onclick="doLogin()">로그인</button>
-  </div>
-</div>
-
-<!-- Chat -->
-<div id="chatWrap">
-  <div id="chatHeader">
-    <div class="icon">🏌️</div>
-    <div>
-      <div class="title">초이스골프 AI</div>
-      <div class="status">● 온라인</div>
-    </div>
-  </div>
-  <div id="messages"></div>
-  <div id="inputArea">
-    <div id="inputRow">
-      <input id="chatInput" placeholder="예약 정보를 입력하세요...">
-      <button id="sendBtn" onclick="send()">전송</button>
-    </div>
-    <div id="footer">초이스골프 ☎ 1533-3160</div>
-  </div>
-</div>
-
-<script>
-// ============ CONFIG ============
-const SB_URL = "https://qmzrpyyadoajwziqachm.supabase.co";
-const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFtenJweXlhZG9hand6aXFhY2htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMDI0NDcsImV4cCI6MjA4OTc3ODQ0N30.CI6ZFvNa2TRa0XqwnrXKL9x3ZHXfKg6GaNwJhqYvCmc";
-
-const AGTS = [
-  { id:"elite", name:"엘리트골프", alias:["엘리트","엘리트골프"] },
-  { id:"sangsang", name:"상상로드투어", alias:["상상","상상로드","상상로드투어"] },
-  { id:"golf4ppl", name:"골프와사람들", alias:["골프와사람들","골사"] },
-  { id:"si", name:"시골프투어", alias:["시골프","시골프투어"] },
-];
-const RM_MAP = {
-  "콘도": "HIS33", "스위트": "HIS33", "콘도33": "HIS33",
-  "인터컨": "IC", "인터컨티넨탈": "IC",
-  "홀리데이인": "HIR", "홀리데이": "HIR",
-  "골프만": "NONE", "숙소없음": "NONE", "호텔없음": "NONE",
-};
-const RM_LABEL = { IC:"인터컨티넨탈", HIR:"홀리데이인 호텔", HIS33:"콘도 33평형", NONE:"호텔없음(골프만)" };
-const agtName = id => AGTS.find(a=>a.id===id)?.name || id;
-
-// ============ SUPABASE ============
-async function sb(method, path, body) {
-  const r = await fetch(SB_URL + "/rest/v1/" + path, {
-    method,
-    headers: {
-      "apikey": SB_KEY,
-      "Authorization": "Bearer " + SB_KEY,
-      "Content-Type": "application/json",
-      "Prefer": method==="POST" ? "return=representation" : method==="PATCH" ? "return=representation" : "",
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!r.ok) throw new Error(await r.text());
-  const t = await r.text();
-  return t ? JSON.parse(t) : null;
-}
-
-// ============ KOREAN PARSER ============
-function parseInput(msg) {
-  const txt = msg.trim();
-
-  // --- Detect action ---
-  if (/삭제|지워|취소해/.test(txt)) return parseDelete(txt);
-  if (/변경|수정|바꿔|바꾸/.test(txt)) return parseUpdate(txt);
-  if (/조회|보여|검색|목록|리스트|몇건/.test(txt)) return parseSearch(txt);
-  // Default: create
-  return parseCreate(txt);
-}
-
-function parseCreate(txt) {
-  const d = {};
-
-  // Date: 5/10, 5-10, 5월10일, 05.10
-  const dm = txt.match(/(\d{1,2})\s*[\/\-\.월]\s*(\d{1,2})일?/);
-  if (dm) {
-    const mon = dm[1].padStart(2,"0"), day = dm[2].padStart(2,"0");
-    d.dep_date = "2026-" + mon + "-" + day;
-  }
-
-  // Nights: 1박, 1박2일, 2박, 2박3일, 3박, 3박4일
-  const nm = txt.match(/([123])박/);
-  if (nm) {
-    const n = parseInt(nm[1]);
-    d.nights = n + "박" + (n+1) + "일";
-  } else {
-    d.nights = "1박2일";
-  }
-  const numRounds = parseInt(d.nights[0]) + 1;
-
-  // Name: Korean name 2-4 chars (not matching known keywords)
-  const keywords = "박일월화수목금토콘도스위트인터컨홀리데이골프만숙소없음호텔없음가예약확정예약확정엘리트상상시골프골프와사람들대중회원명팀부출발";
-  const nameM = txt.match(/([가-힣]{2,4})\s*\d{2,3}[-\s]?\d{3,4}[-\s]?\d{4}/);
-  if (nameM) {
-    d.rep_name = nameM[1];
-  } else {
-    // Try standalone Korean name (2-3 chars not a keyword)
-    const words = txt.split(/[\s,]+/);
-    for (const w of words) {
-      if (/^[가-힣]{2,4}$/.test(w) && !keywords.split("").some(k => w.includes(k)) && w.length >= 2 && w.length <= 4) {
-        // More refined: skip if it's a known term
-        const known = ["콘도","스위트","인터컨","홀리데이","골프만","가예약","확정","엘리트","상상","시골프","회원","대중","출발","확정예약","홀리데이인","인터컨티넨탈","골프와사람들","상상로드투어","시골프투어","엘리트골프","알펜시아"];
-        if (!known.includes(w)) { d.rep_name = w; break; }
-      }
-    }
-  }
-
-  // Phone
-  const pm = txt.match(/(\d{2,3})[-\s.]?(\d{3,4})[-\s.]?(\d{4})/);
-  if (pm) d.phone = pm[1] + "-" + pm[2] + "-" + pm[3];
-
-  // Course combo: 회1부, 회2부, 대1부, 대2부 patterns
-  const rounds = [];
-  // Match patterns like 회2부, 대1부, 회1 대2, etc
-  const courseMatches = [...txt.matchAll(/(회|대)\s*(\d)\s*부?/g)];
-  if (courseMatches.length > 0) {
-    for (const cm of courseMatches) {
-      rounds.push({ type: cm[1] === "회" ? "prv" : "pub", bu: parseInt(cm[2]) });
-    }
-  }
-  // Fill remaining rounds with defaults
-  while (rounds.length < numRounds) {
-    rounds.push({ type: "prv", bu: rounds.length === 0 ? 2 : 1 });
-  }
-  d.combo = rounds.slice(0, numRounds).map(r => r.type).join("|");
-  for (let i = 0; i < numRounds; i++) {
-    d["tee_type" + (i+1)] = rounds[i]?.type === "prv" ? 1 : 0;
-  }
-
-  // Room type
-  for (const [key, val] of Object.entries(RM_MAP)) {
-    if (txt.includes(key)) { d.rm_type = val; break; }
-  }
-  if (!d.rm_type) d.rm_type = "HIS33";
-
-  // AGT
-  for (const a of AGTS) {
-    for (const al of a.alias) {
-      if (txt.includes(al)) { d.agt_id = a.id; break; }
-    }
-    if (d.agt_id) break;
-  }
-  if (!d.agt_id) d.agt_id = "elite";
-
-  // Res type
-  d.res_type = /가예약/.test(txt) ? "tentative" : "confirmed";
-
-  // Teams
-  const tm = txt.match(/(\d+)\s*팀/);
-  d.teams = tm ? parseInt(tm[1]) : 1;
-
-  // People
-  const pplM = txt.match(/(\d+)\s*명/);
-  d.gf_ppl = pplM ? parseInt(pplM[1]) : 0;
-
-  // Memo: everything else we can't parse
-  d.memo = "";
-
-  // Validate
-  if (!d.dep_date) return { action: "error", message: "⚠️ 출발일을 인식하지 못했습니다.\n예시: 5/10, 5월10일" };
-  if (!d.rep_name) return { action: "error", message: "⚠️ 대표자명을 인식하지 못했습니다.\n이름을 포함해서 다시 입력해주세요." };
-
-  // Build confirm message
-  const roundLabels = rounds.slice(0, numRounds).map((r, i) =>
-    `${i+1}R: ${r.type==="prv"?"회원제":"대중제"} ${r.bu}부`
-  ).join("\n");
-
-  const confirmMsg = `📋 예약 등록 확인
-
-출발일: ${d.dep_date}
-일정: ${d.nights}
-대표자: ${d.rep_name}
-연락처: ${d.phone || "미입력"}
-${roundLabels}
-숙소: ${RM_LABEL[d.rm_type]}
-AGT: ${agtName(d.agt_id)}
-유형: ${d.res_type === "tentative" ? "가예약" : "확정예약"}
-${d.teams > 1 ? "팀수: " + d.teams + "팀\n" : ""}${d.gf_ppl > 0 ? "인원: " + d.gf_ppl + "명\n" : ""}
-등록하시겠습니까?`;
-
-  return { action: "create", data: d, message: confirmMsg };
-}
-
-function parseDelete(txt) {
-  const q = {};
-  const nameM = txt.match(/([가-힣]{2,4})\s*(님|의|예약|삭제|지워|취소)/);
-  if (nameM) q.rep_name = nameM[1];
-  const dm = txt.match(/(\d{1,2})\s*[\/\-\.월]\s*(\d{1,2})일?/);
-  if (dm) q.dep_date = "2026-" + dm[1].padStart(2,"0") + "-" + dm[2].padStart(2,"0");
-  if (!q.rep_name && !q.dep_date) return { action: "error", message: "⚠️ 삭제할 예약의 대표자명 또는 날짜를 알려주세요.\n예시: \"홍길동 예약 삭제해줘\"" };
-  return { action: "delete", query: q };
-}
-
-function parseUpdate(txt) {
-  const q = {};
-  const nameM = txt.match(/([가-힣]{2,4})\s*(님|의|예약|날짜|변경|수정)/);
-  if (nameM) q.rep_name = nameM[1];
-  const dm = txt.match(/(\d{1,2})\s*[\/\-\.월]\s*(\d{1,2})일?\s*(예약|날짜|변경|수정)/);
-  if (dm) q.dep_date = "2026-" + dm[1].padStart(2,"0") + "-" + dm[2].padStart(2,"0");
-
-  // What to update
-  const updates = {};
-  const newDateM = txt.match(/(으로|로)\s*변경|(\d{1,2})\s*[\/\-\.월]\s*(\d{1,2})일?\s*(으로|로)/);
-  const dateChangeM = txt.match(/(\d{1,2})\s*[\/\-\.월]\s*(\d{1,2})일?\s*(으로|로)/);
-  if (dateChangeM) updates.dep_date = "2026-" + dateChangeM[1].padStart(2,"0") + "-" + dateChangeM[2].padStart(2,"0");
-
-  if (/가예약/.test(txt)) updates.res_type = "tentative";
-  if (/확정예약|확정으로/.test(txt)) updates.res_type = "confirmed";
-
-  if (!q.rep_name) return { action: "error", message: "⚠️ 수정할 예약의 대표자명을 알려주세요.\n예시: \"홍길동 5/10 예약 날짜 5/15로 변경\"" };
-  return { action: "update", query: q, updates };
-}
-
-function parseSearch(txt) {
-  const q = {};
-  // Check for month
-  const monM = txt.match(/(이번|다음|(\d{1,2}))월/);
-  if (monM) {
-    const now = new Date();
-    let mon;
-    if (monM[1] === "이번") mon = now.getMonth() + 1;
-    else if (monM[1] === "다음") mon = now.getMonth() + 2;
-    else mon = parseInt(monM[2]);
-    q.month = "2026-" + String(mon).padStart(2, "0");
-  }
-  // Check for name
-  const nameM = txt.match(/([가-힣]{2,4})\s*(님|의|예약|조회|보여|검색)/);
-  if (nameM) q.rep_name = nameM[1];
-  // Check for AGT
-  for (const a of AGTS) {
-    for (const al of a.alias) {
-      if (txt.includes(al)) { q.agt_id = a.id; break; }
-    }
-    if (q.agt_id) break;
-  }
-  // Check for date
-  const dm = txt.match(/(\d{1,2})\s*[\/\-\.월]\s*(\d{1,2})일?/);
-  if (dm) q.dep_date = "2026-" + dm[1].padStart(2,"0") + "-" + dm[2].padStart(2,"0");
-
-  if (Object.keys(q).length === 0) {
-    // Default: show all recent
-    q.recent = true;
-  }
-  return { action: "search", query: q };
-}
-
-// ============ SUPABASE OPERATIONS ============
-async function doCreate(data) {
-  const numRounds = parseInt(data.nights[0]) + 1;
-  const payload = {
-    agt_id: data.agt_id || "elite",
-    dep_date: data.dep_date,
-    rep_name: data.rep_name,
-    phone: data.phone || "",
-    product_id: "alpensia",
-    nights: data.nights || "1박2일",
-    combo: data.combo || "prv|prv",
-    teams: data.teams || 1,
-    rm_type: data.rm_type || "HIS33",
-    rm_cnt1: 1, rm_type2: "NONE", rm_cnt2: 0,
-    rm_type3: "NONE", rm_cnt3: 0, rm_type4: "NONE", rm_cnt4: 0,
-    rm_ppl1: 0, rm_ppl2: 0, rm_ppl3: 0, rm_ppl4: 0,
-    tee1: "", tee2: "", tee3: "", tee4: "",
-    tee_sur1: 0, tee_sur2: 0, tee_sur3: 0, tee_sur4: 0,
-    tee_type1: data.tee_type1 ?? 1,
-    tee_type2: data.tee_type2 ?? 0,
-    tee_type3: data.tee_type3 ?? 0,
-    tee_type4: data.tee_type4 ?? 0,
-    gf_ppl: data.gf_ppl || 0,
-    bf_ppl: data.bf_ppl || 0,
-    bf_included: true,
-    memo: data.memo || "",
-    res_type: data.res_type || "confirmed",
-  };
-  const result = await sb("POST", "reservations", payload);
-  return result?.[0];
-}
-
-async function doSearch(query) {
-  let path = "reservations?order=dep_date.desc&limit=30";
-  if (query.rep_name) path += "&rep_name=eq." + encodeURIComponent(query.rep_name);
-  if (query.dep_date) path += "&dep_date=eq." + query.dep_date;
-  if (query.agt_id) path += "&agt_id=eq." + query.agt_id;
-  if (query.month) {
-    const [y, m] = query.month.split("-");
-    const start = query.month + "-01";
-    const nextM = parseInt(m) + 1;
-    const end = nextM > 12 ? (parseInt(y)+1) + "-01-01" : y + "-" + String(nextM).padStart(2,"0") + "-01";
-    path += "&dep_date=gte." + start + "&dep_date=lt." + end;
-  }
-  if (query.recent) path = "reservations?order=dep_date.desc&limit=10";
-  return await sb("GET", path);
-}
-
-async function doDelete(id) {
-  await sb("DELETE", "reservations?id=eq." + id);
-}
-
-async function doUpdate(id, fields) {
-  await sb("PATCH", "reservations?id=eq." + id, fields);
-}
-
-function formatRes(r) {
-  const combo = (r.combo||"").split("|").map(c => c==="prv"?"회원":"대중").join("+");
-  return `📌 ${r.rep_name} | ${r.dep_date} | ${r.nights}
-   ${combo} | ${RM_LABEL[r.rm_type]||r.rm_type} | ${agtName(r.agt_id)}
-   ${r.res_type==="tentative"?"📋가예약":"✅확정"} ${r.phone||""} ${r.memo?"| "+r.memo:""}`;
-}
-
-// ============ UI ============
-let pending = null;
-
-function doLogin() {
-  const pw = document.getElementById("pwInput").value;
-  if (pw === "0090") {
-    document.getElementById("loginWrap").style.display = "none";
-    document.getElementById("chatWrap").style.display = "flex";
-    addAI(`안녕하세요! 🏌️ 초이스골프 예약 AI입니다.
-
-💬 대화로 예약을 등록·수정·삭제·조회할 수 있습니다.
-
-📝 입력 예시:
-• 5/10 1박2일 홍길동 010-1234-5678 회2부 대1부 콘도 엘리트골프 가예약
-• 홍길동 예약 삭제해줘
-• 이번달 예약 보여줘
-• 홍길동 날짜 5/15로 변경`);
-    document.getElementById("chatInput").focus();
-  } else {
-    alert("비밀번호가 틀렸습니다.");
-  }
-}
-document.getElementById("pwInput").addEventListener("keydown", e => { if (e.key==="Enter") doLogin(); });
-
-function addBubble(role, text) {
-  const wrap = document.getElementById("messages");
-  const div = document.createElement("div");
-  div.className = "msg " + role;
-  div.innerHTML = `<div class="bubble">${escHtml(text)}</div>`;
-  wrap.appendChild(div);
-  wrap.scrollTop = wrap.scrollHeight;
-}
-
-function addAI(text) { addBubble("ai", text); }
-function addUser(text) { addBubble("user", text); }
-
-function addAIWithButtons(text, buttons) {
-  const wrap = document.getElementById("messages");
-  const div = document.createElement("div");
-  div.className = "msg ai";
-  let btnHtml = `<div class="quick-btns">`;
-  buttons.forEach(b => {
-    btnHtml += `<button class="quick-btn" onclick="handleQuick('${escAttr(b)}')">${escHtml(b)}</button>`;
-  });
-  btnHtml += `</div>`;
-  div.innerHTML = `<div class="bubble">${escHtml(text)}${btnHtml}</div>`;
-  wrap.appendChild(div);
-  wrap.scrollTop = wrap.scrollHeight;
-}
-
-function showLoading() {
-  const wrap = document.getElementById("messages");
-  const div = document.createElement("div");
-  div.className = "msg ai";
-  div.id = "loadingMsg";
-  div.innerHTML = `<div class="bubble"><span class="loading-dot">분석 중...</span></div>`;
-  wrap.appendChild(div);
-  wrap.scrollTop = wrap.scrollHeight;
-}
-function hideLoading() {
-  const el = document.getElementById("loadingMsg");
-  if (el) el.remove();
-}
-
-function escHtml(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\n/g,"<br>"); }
-function escAttr(s) { return s.replace(/'/g,"\\'").replace(/"/g,"&quot;"); }
-
-function handleQuick(txt) {
-  document.getElementById("chatInput").value = txt;
-  send();
-}
-
-async function send() {
-  const input = document.getElementById("chatInput");
-  const msg = input.value.trim();
-  if (!msg) return;
-  input.value = "";
-  addUser(msg);
-
-  const btn = document.getElementById("sendBtn");
-  btn.disabled = true;
-
-  // Handle pending confirmation
-  if (pending) {
-    if (/^(확인|등록|네|ㅇㅇ|yes|삭제|변경|수정)$/i.test(msg)) {
-      showLoading();
-      try {
-        if (pending.action === "create") {
-          const result = await doCreate(pending.data);
-          hideLoading();
-          addAI(`✅ 예약 등록 완료!\n\n${formatRes(result)}`);
-        } else if (pending.action === "delete") {
-          await doDelete(pending.targetId);
-          hideLoading();
-          addAI("🗑️ 예약이 삭제되었습니다.");
-        } else if (pending.action === "update") {
-          await doUpdate(pending.targetId, pending.updates);
-          hideLoading();
-          addAI("✏️ 예약이 수정되었습니다.");
-        }
-      } catch(e) {
-        hideLoading();
-        addAI("❌ 오류: " + e.message);
-      }
-      pending = null;
-      btn.disabled = false;
-      return;
-    } else if (/^(취소|아니|ㄴㄴ|no)$/i.test(msg)) {
-      pending = null;
-      addAI("↩️ 취소되었습니다.");
-      btn.disabled = false;
-      return;
-    }
-    // Number selection for multi-result
-    const num = parseInt(msg);
-    if (!isNaN(num) && pending.candidates) {
-      const target = pending.candidates[num - 1];
-      if (target) {
-        if (pending.action === "delete_select") {
-          pending = { action: "delete", targetId: target.id };
-          addAIWithButtons(`🗑️ 삭제할 예약:\n\n${formatRes(target)}`, ["삭제", "취소"]);
-        } else if (pending.action === "update_select") {
-          pending = { action: "update", targetId: target.id, updates: pending.updates };
-          addAIWithButtons(`✏️ 수정할 예약:\n\n${formatRes(target)}`, ["변경", "취소"]);
-        }
-        btn.disabled = false;
-        return;
-      }
-    }
-    pending = null;
-  }
-
-  // Parse input
-  showLoading();
-  // Small delay to show loading
-  await new Promise(r => setTimeout(r, 300));
-
+export default async function handler(req, res) {
+  // CORS
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+ 
+  const API_KEY = process.env.ANTHROPIC_API_KEY;
+  if (!API_KEY) return res.status(500).json({ error: "API key not configured" });
+ 
   try {
-    const parsed = parseInput(msg);
-    hideLoading();
-
-    if (parsed.action === "error") {
-      addAI(parsed.message);
-    } else if (parsed.action === "create") {
-      pending = { action: "create", data: parsed.data };
-      addAIWithButtons(parsed.message, ["확인", "취소"]);
-    } else if (parsed.action === "search") {
-      const results = await doSearch(parsed.query);
-      if (!results || results.length === 0) {
-        addAI("🔍 검색 결과가 없습니다.");
-      } else {
-        const list = results.map((r,i) => `${i+1}. ${formatRes(r)}`).join("\n\n");
-        addAI(`🔍 ${results.length}건 조회됨\n\n${list}`);
-      }
-    } else if (parsed.action === "delete") {
-      const results = await doSearch(parsed.query);
-      if (!results || results.length === 0) {
-        addAI("🔍 해당 예약을 찾을 수 없습니다.");
-      } else if (results.length === 1) {
-        pending = { action: "delete", targetId: results[0].id };
-        addAIWithButtons(`🗑️ 삭제할 예약:\n\n${formatRes(results[0])}`, ["삭제", "취소"]);
-      } else {
-        const list = results.map((r,i) => `${i+1}. ${formatRes(r)}`).join("\n\n");
-        addAI(`🔍 ${results.length}건 발견됨. 번호를 선택하세요:\n\n${list}`);
-        pending = { action: "delete_select", candidates: results };
-      }
-    } else if (parsed.action === "update") {
-      const results = await doSearch(parsed.query);
-      if (!results || results.length === 0) {
-        addAI("🔍 해당 예약을 찾을 수 없습니다.");
-      } else if (results.length === 1) {
-        pending = { action: "update", targetId: results[0].id, updates: parsed.updates };
-        addAIWithButtons(`✏️ 수정할 예약:\n\n${formatRes(results[0])}\n\n변경 내용: ${JSON.stringify(parsed.updates)}`, ["변경", "취소"]);
-      } else {
-        const list = results.map((r,i) => `${i+1}. ${formatRes(r)}`).join("\n\n");
-        addAI(`🔍 ${results.length}건 발견됨. 번호를 선택하세요:\n\n${list}`);
-        pending = { action: "update_select", candidates: results, updates: parsed.updates };
-      }
+    const { message } = req.body;
+ 
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1024,
+        system: SYSTEM_PROMPT,
+        messages: [{ role: "user", content: message }],
+      }),
+    });
+ 
+    const data = await response.json();
+    if (!response.ok) return res.status(response.status).json(data);
+ 
+    const text = data.content?.map(c => c.text || "").join("") || "";
+    const clean = text.replace(/```json|```/g, "").trim();
+ 
+    try {
+      const parsed = JSON.parse(clean);
+      return res.status(200).json(parsed);
+    } catch {
+      return res.status(200).json({ action: "unknown", error_message: "AI 응답 파싱 실패", raw: clean });
     }
-  } catch(e) {
-    hideLoading();
-    addAI("❌ 오류: " + e.message);
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
   }
-
-  btn.disabled = false;
-  document.getElementById("chatInput").focus();
 }
-
-document.getElementById("chatInput").addEventListener("keydown", e => {
-  if (e.key === "Enter" && !e.isComposing) send();
-});
-</script>
-</body>
-</html>
+ 
+const SYSTEM_PROMPT = `당신은 골프투어 예약 관리 AI입니다. 사용자의 한국어 메시지를 분석하여 JSON으로 응답하세요.
+절대 JSON 외의 텍스트를 포함하지 마세요. 마크다운 코드블록도 사용하지 마세요.
+ 
+## 가능한 액션
+1. "create" - 예약 등록
+2. "update" - 예약 수정
+3. "delete" - 예약 삭제
+4. "search" - 예약 조회/검색
+5. "unknown" - 이해 불가
+ 
+## 필드 매핑 규칙
+- 날짜: "5/10", "5월10일", "20일", "다음주 수요일" 등 → "2026-MM-DD" 형식. 연도 없으면 2026년. 월 없이 "20일"만 있으면 현재 월 기준.
+- 일정: "1박", "1박2일" → nights="1박2일", "2박", "2박3일" → nights="2박3일", "3박", "3박4일" → nights="3박4일". 기본값: "1박2일"
+- 이름: 한국인 이름 (2~4글자) → rep_name
+- 전화번호: 010-XXXX-XXXX 또는 변형 → phone (하이픈 포함 정규화)
+- 코스 조합 (라운드별):
+  "회" = 회원제(prv), "대" = 대중제(pub)
+  "1부" 또는 "2부"는 티타임 구분
+  예시:
+  "회2부 대1부" → 1R:회원제2부, 2R:대중제1부 → combo="prv|pub", tee_type1=1(회원), tee_type2=0(대중)
+  "대2 대1" → 1R:대중제2부, 2R:대중제1부 → combo="pub|pub", tee_type1=0, tee_type2=0
+  "회1 회2" → combo="prv|prv", tee_type1=1, tee_type2=1
+  "대중제2부 + 대중제1부" → combo="pub|pub", tee_type1=0, tee_type2=0
+  ※ tee_type은 회원/대중 구분: 1=회원제, 0=대중제
+  ※ 3박4일이면 4개 라운드 (combo="prv|pub|prv|pub" 식)
+- 숙소:
+  "콘도", "스위트", "콘도33" → rm_type="HIS33"
+  "인터컨", "인터컨티넨탈" → rm_type="IC"
+  "홀리데이인", "홀리데이" → rm_type="HIR"
+  "골프만", "숙소없음", "호텔없음" → rm_type="NONE"
+  기본값: "HIS33"
+- AGT (여행사):
+  "엘리트", "엘리트골프" → agt_id="elite"
+  "상상", "상상로드", "상상로드투어" → agt_id="sangsang"
+  "골프와사람들", "골사" → agt_id="golf4ppl"
+  "시골프", "시골프투어" → agt_id="si"
+  기본값: "elite"
+- 예약유형: "가예약" → res_type="tentative", "확정" 또는 "확정예약" → res_type="confirmed". 기본값: "confirmed"
+- 팀수: "2팀" → teams=2. 기본값: 1
+- 골프인원: "4명" → gf_ppl=4. 기본값: 0
+- 메모: 위 항목에 해당하지 않는 특이사항 → memo
+ 
+## 대화 이해 규칙
+- 축약어/비격식체를 이해해야 함: "회2 대1" = "회원제2부 대중제1부", "콘도" = "HIS33", "엘리트" = "엘리트골프"
+- "라니까", "라고", "라니" 등은 정정/강조 표현. 예: "대중제2부 + 대중제1부 라니까?" → create 또는 이전 맥락에 따라 update
+- "걍", "그냥" = 강조 부사, 무시하고 핵심 의도 파악
+- "아까 그", "그거", "전에" = 이전 예약 참조 → search/update/delete
+- 날짜 없이 이름만 언급 → search로 찾기
+- 오늘 날짜는 2026년 기준
+ 
+## 응답 형식 (반드시 JSON만, 다른 텍스트 절대 불가)
+{
+  "action": "create|update|delete|search|unknown",
+  "data": { ... 필드들 ... },
+  "search_query": { "rep_name": "...", "dep_date": "...", "agt_id": "...", "month": "2026-04" },
+  "update_fields": { ... 변경할 필드만 ... },
+  "confirm_message": "사용자에게 보여줄 확인 메시지 (한국어, 줄바꿈은 \\n 사용)",
+  "error_message": "이해 못한 경우 메시지"
+}
+ 
+## 예시들
+ 
+입력: "박병균 4/20 대2 대1 콘도 엘리트 확정"
+{"action":"create","data":{"dep_date":"2026-04-20","nights":"1박2일","rep_name":"박병균","phone":"","combo":"pub|pub","tee_type1":0,"tee_type2":0,"rm_type":"HIS33","agt_id":"elite","res_type":"confirmed","teams":1,"gf_ppl":0,"memo":""},"confirm_message":"📋 예약 등록 확인\\n출발일: 2026-04-20\\n일정: 1박2일\\n대표자: 박병균\\n1R: 대중제 2부\\n2R: 대중제 1부\\n숙소: 콘도 33평형\\nAGT: 엘리트골프\\n유형: 확정예약\\n\\n등록하시겠습니까?"}
+ 
+입력: "대중제2부 + 대중제1부 라니까?"
+{"action":"create","data":{"combo":"pub|pub","tee_type1":0,"tee_type2":0},"confirm_message":"네, 1R 대중제 2부 + 2R 대중제 1부로 설정했습니다.\\n나머지 정보(출발일, 이름 등)를 알려주세요.","error_message":""}
+ 
+입력: "걍 삭제해 박병균꺼"
+{"action":"delete","search_query":{"rep_name":"박병균"},"confirm_message":"박병균님 예약을 검색합니다."}
+ 
+입력: "엘리트 이번달 예약 몇개야?"
+{"action":"search","search_query":{"agt_id":"elite","month":"2026-04"},"confirm_message":"엘리트골프 4월 예약을 조회합니다."}
+ 
+입력: "아까 그 박병균 날짜 25일로 바꿔"
+{"action":"update","search_query":{"rep_name":"박병균"},"update_fields":{"dep_date":"2026-04-25"},"confirm_message":"박병균님 예약 출발일을 4/25로 변경하시겠습니까?"}`;
