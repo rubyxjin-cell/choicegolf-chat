@@ -23,6 +23,8 @@
   #chatHeader .icon { font-size: 26px; }
   #chatHeader .title { font-size: 16px; font-weight: 800; }
   #chatHeader .status { font-size: 11px; color: #34d399; }
+  #resetBtn { margin-left: auto; padding: 6px 12px; border-radius: 8px; border: 1px solid #2a3a32; background: transparent; color: #7a9a8a; font-size: 12px; cursor: pointer; }
+  #resetBtn:active { background: #2a3a32; }
 
   #messages { flex: 1; overflow-y: auto; padding: 16px 12px; -webkit-overflow-scrolling: touch; }
   .msg { display: flex; margin-bottom: 10px; }
@@ -67,6 +69,7 @@
       <div class="title">초이스골프 AI</div>
       <div class="status">● 온라인</div>
     </div>
+    <button id="resetBtn" onclick="resetChat()">새 대화</button>
   </div>
   <div id="messages"></div>
   <div id="inputArea">
@@ -91,6 +94,18 @@ const AGTS = [
 const RM_LABEL = { IC:"인터컨티넨탈", HIR:"홀리데이인 호텔", HIS33:"콘도 33평형", NONE:"호텔없음(골프만)" };
 const agtName = id => AGTS.find(a=>a.id===id)?.name || id;
 
+// 대화 기록 (AI에게 맥락 전달용)
+let aiHistory = [];
+let partialData = null; // clarify 시 임시 저장
+
+function resetChat() {
+  aiHistory = [];
+  partialData = null;
+  pending = null;
+  document.getElementById("messages").innerHTML = "";
+  addAI("💬 새 대화를 시작합니다. 예약 정보를 말씀해주세요!");
+}
+
 async function sbApi(method, path, body) {
   const r = await fetch(SB_URL + "/rest/v1/" + path, {
     method,
@@ -102,25 +117,41 @@ async function sbApi(method, path, body) {
     },
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (!r.ok) throw new Error(await r.text());
+  if (!r.ok) {
+    const errText = await r.text();
+    console.error("Supabase error:", errText);
+    throw new Error("DB 오류: " + r.status);
+  }
   const t = await r.text();
   return t ? JSON.parse(t) : null;
 }
 
-// AI 호출 (Vercel serverless function 경유)
-async function callAI(message) {
+async function callAI(userMsg) {
+  // 대화 기록에 사용자 메시지 추가
+  aiHistory.push({ role: "user", content: userMsg });
+
+  // 최근 10개만 보내기 (비용 절약)
+  const recentHistory = aiHistory.slice(-10);
+
   const r = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ messages: recentHistory }),
   });
-  if (!r.ok) throw new Error("AI 호출 실패: " + r.status);
-  return await r.json();
+  const data = await r.json();
+  if (!r.ok) {
+    console.error("AI error:", data);
+    throw new Error("AI 호출 실패: " + (data.error || r.status));
+  }
+  console.log("AI response:", data);
+
+  // AI 응답도 기록에 추가 (맥락 유지)
+  aiHistory.push({ role: "assistant", content: JSON.stringify(data) });
+
+  return data;
 }
 
-// Supabase 작업
 async function doCreate(data) {
-  const numRounds = data.nights ? parseInt(data.nights[0]) + 1 : 2;
   const payload = {
     agt_id: data.agt_id || "elite",
     dep_date: data.dep_date,
@@ -146,6 +177,7 @@ async function doCreate(data) {
     memo: data.memo || "",
     res_type: data.res_type || "confirmed",
   };
+  console.log("Creating:", payload);
   return (await sbApi("POST", "reservations", payload))?.[0];
 }
 
@@ -182,9 +214,8 @@ let pending = null;
 function doLogin() {
   if (document.getElementById("pwInput").value === "0090") {
     document.getElementById("loginWrap").style.display = "none";
-    const cw = document.getElementById("chatWrap");
-    cw.style.display = "flex";
-    addAI("안녕하세요! 🏌️ 초이스골프 예약 AI입니다.\n\n💬 자연스럽게 말씀하시면 알아서 처리해드립니다.\n\n📝 예시:\n• 박병균 4/20 대2 대1 콘도 엘리트 확정\n• 걍 삭제해 박병균꺼\n• 엘리트 이번달 예약 보여줘\n• 아까 그 박병균 날짜 25일로 바꿔");
+    document.getElementById("chatWrap").style.display = "flex";
+    addAI("안녕하세요! 🏌️ 초이스골프 예약 AI입니다.\n\n자연스럽게 말씀하시면 알아서 처리해드립니다.\n정보가 부족하면 제가 다시 여쭤볼게요!\n\n📝 예시:\n• 엘리트 박병균 대대 콘도 예약잡아줘\n• 박병균 대2부 대1부로 변경해줘\n• 걍 삭제해 박병균꺼\n• 이번달 예약 보여줘");
     document.getElementById("chatInput").focus();
   } else { alert("비밀번호가 틀렸습니다."); }
 }
@@ -242,27 +273,33 @@ async function send() {
 
   // Pending confirmation
   if (pending) {
-    if (/^(확인|등록|네|ㅇㅇ|yes|삭제|변경|수정|ㅇ)$/i.test(msg)) {
+    if (/^(확인|등록|네|ㅇㅇ|yes|삭제|변경|수정|ㅇ|ㅇㅋ|ㄱㄱ|고|좋아|오키|ok)$/i.test(msg)) {
       showLoading();
       try {
         if (pending.action === "create") {
           const result = await doCreate(pending.data);
           hideLoading();
           addAI("✅ 예약 등록 완료!\n\n" + formatRes(result));
+          aiHistory = []; partialData = null; // 등록 완료 후 맥락 초기화
         } else if (pending.action === "delete") {
           await doDelete(pending.targetId);
           hideLoading();
           addAI("🗑️ 예약이 삭제되었습니다.");
+          aiHistory = []; partialData = null;
         } else if (pending.action === "update") {
           await doUpdate(pending.targetId, pending.updates);
           hideLoading();
           addAI("✏️ 예약이 수정되었습니다.");
+          aiHistory = []; partialData = null;
         }
       } catch(e) { hideLoading(); addAI("❌ 오류: " + e.message); }
       pending = null; btn.disabled = false; return;
-    } else if (/^(취소|아니|ㄴㄴ|no)$/i.test(msg)) {
-      pending = null; addAI("↩️ 취소되었습니다."); btn.disabled = false; return;
+    } else if (/^(취소|아니|ㄴㄴ|no|ㄴ)$/i.test(msg)) {
+      pending = null; partialData = null; aiHistory = [];
+      addAI("↩️ 취소되었습니다.");
+      btn.disabled = false; return;
     }
+    // Number selection
     const num = parseInt(msg);
     if (!isNaN(num) && pending.candidates) {
       const target = pending.candidates[num - 1];
@@ -277,6 +314,7 @@ async function send() {
         btn.disabled = false; return;
       }
     }
+    // Not a confirm/cancel, treat as new input - fall through to AI
     pending = null;
   }
 
@@ -288,45 +326,62 @@ async function send() {
 
     if (parsed.action === "create") {
       if (!parsed.data?.dep_date || !parsed.data?.rep_name) {
-        addAI(parsed.confirm_message || "⚠️ 출발일과 대표자명은 필수입니다. 다시 입력해주세요.");
+        addAI(parsed.confirm_message || parsed.message || "⚠️ 출발일과 대표자명을 포함해서 다시 말씀해주세요.");
       } else {
+        // partial_data가 있으면 합치기
+        if (partialData) {
+          parsed.data = { ...partialData, ...parsed.data };
+          partialData = null;
+        }
         pending = { action: "create", data: parsed.data };
         addAIWithButtons(parsed.confirm_message || "등록하시겠습니까?", ["확인", "취소"]);
       }
+    } else if (parsed.action === "clarify") {
+      // 부분 데이터 저장
+      if (parsed.partial_data) {
+        partialData = { ...(partialData || {}), ...parsed.partial_data };
+      }
+      addAI(parsed.message || "추가 정보를 알려주세요.");
     } else if (parsed.action === "search") {
-      const results = await doSearch(parsed.search_query || {});
-      if (!results || results.length === 0) {
-        addAI("🔍 검색 결과가 없습니다.");
-      } else {
-        const list = results.map((r,i) => (i+1) + ". " + formatRes(r)).join("\n\n");
-        addAI("🔍 " + results.length + "건 조회됨\n\n" + list);
-      }
+      try {
+        const results = await doSearch(parsed.search_query || {});
+        if (!results || results.length === 0) {
+          addAI("🔍 검색 결과가 없습니다.");
+        } else {
+          const list = results.map((r,i) => (i+1) + ". " + formatRes(r)).join("\n\n");
+          addAI("🔍 " + results.length + "건 조회됨\n\n" + list);
+        }
+      } catch(e) { addAI("❌ 조회 오류: " + e.message); }
     } else if (parsed.action === "delete") {
-      const results = await doSearch(parsed.search_query || {});
-      if (!results || results.length === 0) {
-        addAI("🔍 해당 예약을 찾을 수 없습니다.");
-      } else if (results.length === 1) {
-        pending = { action: "delete", targetId: results[0].id };
-        addAIWithButtons("🗑️ 삭제할 예약:\n\n" + formatRes(results[0]), ["삭제", "취소"]);
-      } else {
-        const list = results.map((r,i) => (i+1) + ". " + formatRes(r)).join("\n\n");
-        addAI("🔍 " + results.length + "건 발견됨. 번호를 선택하세요:\n\n" + list);
-        pending = { action: "delete_select", candidates: results };
-      }
+      try {
+        const results = await doSearch(parsed.search_query || {});
+        if (!results || results.length === 0) {
+          addAI("🔍 해당 예약을 찾을 수 없습니다.");
+        } else if (results.length === 1) {
+          pending = { action: "delete", targetId: results[0].id };
+          addAIWithButtons("🗑️ 삭제할 예약:\n\n" + formatRes(results[0]), ["삭제", "취소"]);
+        } else {
+          const list = results.map((r,i) => (i+1) + ". " + formatRes(r)).join("\n\n");
+          addAI("🔍 " + results.length + "건 발견됨. 번호를 선택하세요:\n\n" + list);
+          pending = { action: "delete_select", candidates: results };
+        }
+      } catch(e) { addAI("❌ 검색 오류: " + e.message); }
     } else if (parsed.action === "update") {
-      const results = await doSearch(parsed.search_query || {});
-      if (!results || results.length === 0) {
-        addAI("🔍 해당 예약을 찾을 수 없습니다.");
-      } else if (results.length === 1) {
-        pending = { action: "update", targetId: results[0].id, updates: parsed.update_fields || {} };
-        addAIWithButtons("✏️ 수정할 예약:\n\n" + formatRes(results[0]) + "\n\n" + (parsed.confirm_message||""), ["변경", "취소"]);
-      } else {
-        const list = results.map((r,i) => (i+1) + ". " + formatRes(r)).join("\n\n");
-        addAI("🔍 " + results.length + "건 발견됨. 번호를 선택하세요:\n\n" + list);
-        pending = { action: "update_select", candidates: results, updates: parsed.update_fields || {} };
-      }
+      try {
+        const results = await doSearch(parsed.search_query || {});
+        if (!results || results.length === 0) {
+          addAI("🔍 해당 예약을 찾을 수 없습니다.");
+        } else if (results.length === 1) {
+          pending = { action: "update", targetId: results[0].id, updates: parsed.update_fields || {} };
+          addAIWithButtons("✏️ 수정할 예약:\n\n" + formatRes(results[0]) + "\n\n" + (parsed.confirm_message||"변경하시겠습니까?"), ["변경", "취소"]);
+        } else {
+          const list = results.map((r,i) => (i+1) + ". " + formatRes(r)).join("\n\n");
+          addAI("🔍 " + results.length + "건 발견됨. 번호를 선택하세요:\n\n" + list);
+          pending = { action: "update_select", candidates: results, updates: parsed.update_fields || {} };
+        }
+      } catch(e) { addAI("❌ 검색 오류: " + e.message); }
     } else {
-      addAI(parsed.error_message || parsed.confirm_message || "이해하지 못했습니다. 다시 말씀해주세요.");
+      addAI(parsed.error_message || parsed.message || parsed.confirm_message || "이해하지 못했습니다. 다시 말씀해주세요.");
     }
   } catch(e) {
     hideLoading();
