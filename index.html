@@ -173,7 +173,7 @@ async function doCreate(data) {
     tee_type4: data.tee_type4 ?? 0,
     gf_ppl: data.gf_ppl || 0,
     bf_ppl: data.bf_ppl || 0,
-    bf_included: true,
+    bf_included: data.bf_included !== false,
     memo: data.memo || "",
     res_type: data.res_type || "confirmed",
   };
